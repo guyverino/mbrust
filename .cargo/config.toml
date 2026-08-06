@@ -1,0 +1,4 @@
+# Use system git binary for fetching deps (handles SSH agent/keys reliably,
+# unlike the bundled libgit2 fetcher).
+[net]
+git-fetch-with-cli = true

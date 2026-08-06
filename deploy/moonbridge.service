@@ -1,0 +1,17 @@
+[Unit]
+Description=moonbridge — MoonProto <-> SQLite bridge (receive + send)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mb_admin
+WorkingDirectory=/home/mb_admin/mb_ai_rust
+# .env читается самим бинарём (dotenvy) из WorkingDirectory.
+# Для production собери release и замени путь на target/release/moonbridge.
+ExecStart=/home/mb_admin/mb_ai_rust/target/debug/moonbridge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

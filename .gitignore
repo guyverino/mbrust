@@ -1,0 +1,38 @@
+# Build artifacts
+/target
+**/target
+Cargo.lock.bak
+
+# Локальные конфиги (токены, секреты)
+config.toml
+**/config.toml
+!.cargo/config.toml
+.env
+**/.env
+
+
+
+# SQLite — файлы БД (данные, не в гит)
+*.db
+*.db-wal
+*.db-shm
+/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE / OS
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+logs/
+nohup.out
+
+# Python venv
+.venv/
+venv/

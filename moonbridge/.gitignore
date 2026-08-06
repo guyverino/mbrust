@@ -1,0 +1,11 @@
+/target
+
+# Локальный конфиг — содержит DB DSN с паролем
+config.toml
+.env
+
+# IDE / OS
+*.swp
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,34 @@
+[package]
+name = "moonbridge"
+version = "0.1.0"
+edition = "2021"
+description = "MoonProto ↔ SQLite bridge: receive strategies/orders, send commands. Open platform host for private modules."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/guyverino/moonbridge"
+readme = "README.md"
+keywords = ["moonbot", "trading", "sqlite", "moonproto"]
+
+[[bin]]
+name = "moonbridge"
+path = "src/main.rs"
+
+[dependencies]
+# MoonProto-протокол — Rust-библиотека от Moonbot-Tech.
+# Приватный репо, доступ по SSH-ключу. Пин коммита — в Cargo.lock.
+# Чтобы подтянуть свежие коммиты:  cargo update -p moonproto
+moonproto = { git = "https://github.com/Moonbot-Tech/MoonProtoBeta.git", branch = "main" }
+
+# SQLite (bundled = собирается статически, не требует системного libsqlite).
+# Zero-config: файл БД создаётся сам, ни сервера, ни юзера.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+dotenvy = "0.15"

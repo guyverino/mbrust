@@ -1,0 +1,16 @@
+[Unit]
+Description=moonbridge hub — Telegram bot + module registry
+After=network-online.target moonbridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mb_admin
+WorkingDirectory=/home/mb_admin/mb_ai_rust
+# .env читается python-dotenv из WorkingDirectory. Запуск из venv hub/.venv.
+ExecStart=/home/mb_admin/mb_ai_rust/hub/.venv/bin/python -m hub.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
