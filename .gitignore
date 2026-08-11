@@ -36,3 +36,9 @@ nohup.out
 # Python venv
 .venv/
 venv/
+
+# Инструкции AI-агентам — локальные, в публичный репо не идут
+/CLAUDE.md
+/AGENTS.md
+/doc/
+/.claude/
