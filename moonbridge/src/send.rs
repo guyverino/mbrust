@@ -271,10 +271,11 @@ fn edit_and_sync(
     }
 
     if applied == 0 {
+        // id'шники и в ошибку: вызывающему они нужны ровно так же, как в успешном
+        // ответе — иначе на полном промахе батча он знает счётчик, но не имена.
         return Err(format!(
-            "no strategies applied (found {}, missing {}, fields skipped {}){}",
+            "no strategies applied (found {}, missing {missing:?}, fields skipped {}){}",
             edits.len() - missing.len(),
-            missing.len(),
             skipped,
             init_err.map(|e| format!(": {e}")).unwrap_or_default(),
         ));
@@ -286,7 +287,10 @@ fn edit_and_sync(
         .map_err(fmt_err)?;
     Ok(json!({
         "strategies": applied, "fields": fields,
-        "missing": missing.len(), "skipped": skipped,
+        // Счётчик оставлен для совместимости, но вызывающему нужен ИМЕННО список:
+        // батч считается 'sent' при applied>=1, и без id'шников Python-сторона не
+        // может отличить «мою стратегию ядро не нашло» от «чужую в том же батче».
+        "missing": missing.len(), "missing_ids": missing, "skipped": skipped,
         "skipped_fields": skipped_names,
     }))
 }

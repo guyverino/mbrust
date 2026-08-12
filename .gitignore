@@ -42,3 +42,4 @@ venv/
 /AGENTS.md
 /doc/
 /.claude/
+/.agent-hooks/

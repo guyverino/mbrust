@@ -22,10 +22,15 @@ class Commander:
         self._db = db
         self._commands = commands
 
+    @staticmethod
+    def to_uid(moonbot_id):
+        """moonbot_id → u64, как ждёт MoonProto. В БД он хранится ЗНАКОВЫМ int64
+        (Delphi/BIGINT), поэтому битово переинтерпретируем: отрицательное `x` →
+        `x + 2^64` (маска 64 бит). Единственное место, где живёт это правило —
+        сопоставлять id из ответов ядра нужно по нему же."""
+        return None if moonbot_id is None else int(moonbot_id) & 0xFFFFFFFFFFFFFFFF
+
     def _strategy_id(self, server_id: int, name: str):
-        """Вернуть moonbot_id как u64 (MoonProto ждёт u64). В БД он хранится
-        ЗНАКОВЫМ int64 (Delphi/BIGINT), поэтому битово переинтерпретируем:
-        отрицательное `x` → `x + 2^64` (маска 64 бит)."""
         r = self._db.fetch_one(
             "SELECT moonbot_id FROM strategies WHERE server_id=? AND name=?",
             (server_id, name),
@@ -33,7 +38,7 @@ class Commander:
         if not r:
             logger.warning("commander: стратегия %r не найдена на сервере %s", name, server_id)
             return None
-        return r[0] & 0xFFFFFFFFFFFFFFFF
+        return self.to_uid(r[0])
 
     # ── глобально по ядру ────────────────────────────────────────
     def start(self, server_id: int):
