@@ -94,10 +94,19 @@ async def main() -> None:
             dp.include_router(r)
             logger.info("router included: %s", l.name)
 
-    # Фоновые задачи модулей.
+    # Фоновые задачи модулей. Ссылки держим обязательно: event loop хранит
+    # task слабо, и задача без ссылки может быть собрана GC на полпути; упавшую
+    # задачу без done-callback никто бы не заметил до самого выхода процесса.
+    def _log_task_crash(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("фоновая задача модуля упала: %r", task.exception())
+
+    bg_tasks: list[asyncio.Task] = []
     for l in active:
         for coro in l.module.background_tasks(hub):
-            asyncio.create_task(coro)
+            task = asyncio.create_task(coro)
+            task.add_done_callback(_log_task_crash)
+            bg_tasks.append(task)
 
     logger.info(
         "hub started: %d активных модулей, %d locked",

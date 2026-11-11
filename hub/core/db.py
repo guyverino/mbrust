@@ -61,3 +61,16 @@ class Db:
         with self._lock:
             self.conn.executescript(script)
             self.conn.commit()
+
+    def executemany(self, query: str, seq_of_params) -> int:
+        """Батч одним коммитом. При ошибке — rollback: полуоткрытую транзакцию
+        на общем коннекте молча закоммитил бы следующий чужой execute().
+        Возвращает суммарный rowcount."""
+        with self._lock:
+            try:
+                cur = self.conn.executemany(query, seq_of_params)
+                self.conn.commit()
+                return cur.rowcount
+            except Exception:
+                self.conn.rollback()
+                raise
