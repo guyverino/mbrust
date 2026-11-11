@@ -35,7 +35,11 @@ thread_local! {
 /// Применить схему отчёта: завести недостающие колонки ядра (append-only).
 /// Вызывать на `ReportEvent::Schema`. Идемпотентно (кэш thread_local из PRAGMA).
 pub fn apply_schema(conn: &Connection, schema: &ReportSchema) -> anyhow::Result<()> {
-    ensure_columns_loaded(conn)?;
+    // Схема приходит редко (коннект + смена ревизии), поэтому кэш здесь перечитывается
+    // БЕЗУСЛОВНО: у каждого ядра свой OS-thread и свой коннект к общему файлу, а
+    // KNOWN_COLS — thread_local. Колонку, заведённую соседним потоком, наш снимок
+    // иначе не увидит до конца жизни процесса.
+    reload_columns(conn)?;
     for field in schema.fields() {
         let key = field.name.to_ascii_lowercase();
         // newRecID — часть составного PK, уже есть; остальные известные пропускаем.
@@ -49,12 +53,23 @@ pub fn apply_schema(conn: &Connection, schema: &ReportSchema) -> anyhow::Result<
         // DDL от хелпера схемы: имя и sql_spec из аутентифицированной схемы ядра,
         // идентификатор в кавычках. Имя таблицы контролируем сами.
         let ddl = schema.sqlite_add_column_sql(TABLE, field);
-        conn.execute(&ddl, [])?;
-        KNOWN_COLS.with(|k| {
-            if let Some(set) = k.borrow_mut().as_mut() {
-                set.insert(key.clone());
+        match add_column(conn, &key, &ddl) {
+            Ok(true) => {}
+            // Колонку успел завести сосед между нашим PRAGMA и ALTER — не ошибка.
+            Ok(false) => continue,
+            // Настоящий отказ DDL логируем и идём дальше. Возврат Err отсюда стоит
+            // дороже: `session::handle_report` присваивает `schema_slot` ТОЛЬКО после
+            // успешного `apply_schema`, а вызывающий Err лишь пишет warn и едет дальше
+            // (session.rs — ни ретрая, ни реконнекта). То есть одна неудачная колонка
+            // оставляла сервер вообще без схемы и глушила ВСЕ страницы отчёта. Пропуск
+            // одной колонки писатель переживает: `write_row` неизвестные поля и так
+            // отбрасывает, а следующее событие Schema повторит ALTER — ключ в кэш при
+            // отказе не попадает.
+            Err(e) => {
+                tracing::warn!("orders: авто-колонка «{}» не заведена: {e:#}", field.name);
+                continue;
             }
-        });
+        }
         // Индекс под окно отчётов/Health по closedate (как у прежнего каталога).
         if key == "closedate" {
             let _ = conn.execute(
@@ -237,11 +252,46 @@ pub fn open_rows(conn: &Connection, server_id: i32) -> anyhow::Result<Vec<i64>> 
 
 // ── Вспомогательное ────────────────────────────────────────────────────────────
 
+/// Завести колонку, терпя её появление из ДРУГОГО потока.
+///
+/// `Ok(true)` — завели мы, `Ok(false)` — колонка уже существовала (её создал поток
+/// соседнего ядра). В обоих случаях кэш приводится к реальной схеме таблицы, иначе
+/// проигравший гонку поток продолжил бы отбрасывать это поле в `write_row`.
+fn add_column(conn: &Connection, key: &str, ddl: &str) -> anyhow::Result<bool> {
+    match conn.execute(ddl, []) {
+        Ok(_) => {
+            KNOWN_COLS.with(|k| {
+                if let Some(set) = k.borrow_mut().as_mut() {
+                    set.insert(key.to_string());
+                }
+            });
+            Ok(true)
+        }
+        Err(e) => {
+            // ALTER мог упасть и по делу (битый sql_spec, отказ БД) — различаем это
+            // по фактической схеме, а не по тексту ошибки SQLite.
+            reload_columns(conn)?;
+            let existed = KNOWN_COLS.with(|k| k.borrow().as_ref().is_some_and(|s| s.contains(key)));
+            if existed {
+                Ok(false)
+            } else {
+                Err(e.into())
+            }
+        }
+    }
+}
+
+/// Безусловно перечитать колонки из PRAGMA (в отличие от `ensure_columns_loaded`,
+/// который грузит только первый раз за жизнь потока).
+fn reload_columns(conn: &Connection) -> anyhow::Result<()> {
+    let set = load_columns(conn)?;
+    KNOWN_COLS.with(|k| *k.borrow_mut() = Some(set));
+    Ok(())
+}
+
 fn ensure_columns_loaded(conn: &Connection) -> anyhow::Result<()> {
-    let need = KNOWN_COLS.with(|k| k.borrow().is_none());
-    if need {
-        let set = load_columns(conn)?;
-        KNOWN_COLS.with(|k| *k.borrow_mut() = Some(set));
+    if KNOWN_COLS.with(|k| k.borrow().is_none()) {
+        reload_columns(conn)?;
     }
     Ok(())
 }
@@ -369,5 +419,41 @@ mod tests {
             .query_row("SELECT status, profitbtc, sellprice FROM orders WHERE server_id=1 AND newrecid=10", [],
                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((st, pr, sl), (1, 2.5, 0.55));
+    }
+
+    /// Репро гонки авто-колонок. Каждое ядро — свой OS-thread со своим коннектом к
+    /// общему файлу, а KNOWN_COLS — thread_local: колонку, заведённую соседом после
+    /// загрузки нашего кэша, мы не видим. Голый `ALTER` на это падает
+    /// («duplicate column name»), ошибка поднималась до `handle_report`, и сессия
+    /// оставалась без схемы отчёта (`schema_slot = None`).
+    #[test]
+    fn add_column_tolerates_column_created_by_another_thread() {
+        let conn = migrated_conn();
+        reload_columns(&conn).unwrap();
+        assert!(
+            !KNOWN_COLS.with(|k| k.borrow().as_ref().unwrap().contains("reportuid")),
+            "предусловие: колонки ещё нет"
+        );
+
+        let ddl = "ALTER TABLE orders ADD COLUMN \"ReportUID\" bigint";
+        conn.execute(ddl, []).unwrap(); // «сосед» завёл колонку мимо нашего кэша
+
+        assert!(conn.execute(ddl, []).is_err(), "репро: повторный ALTER падает");
+        assert!(!add_column(&conn, "reportuid", ddl).unwrap(), "колонка уже есть — не ошибка");
+        assert!(
+            KNOWN_COLS.with(|k| k.borrow().as_ref().unwrap().contains("reportuid")),
+            "кэш обязан подхватить чужую колонку, иначе write_row продолжит терять это поле"
+        );
+    }
+
+    /// Обратная сторона: настоящий отказ DDL не должен маскироваться под гонку.
+    #[test]
+    fn add_column_still_reports_real_ddl_failure() {
+        let conn = migrated_conn();
+        reload_columns(&conn).unwrap();
+        assert!(
+            add_column(&conn, "x", "ALTER TABLE no_such_table ADD COLUMN x int").is_err(),
+            "отказ по несуществующей таблице обязан остаться ошибкой"
+        );
     }
 }
