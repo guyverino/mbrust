@@ -569,11 +569,12 @@ dependencies = [
 [[package]]
 name = "moonproto"
 version = "0.1.0"
-source = "git+https://github.com/Moonbot-Tech/MoonProtoBeta.git?branch=main#6cf9f89d31e54a65982aae287f8c7128e9f76304"
+source = "git+https://github.com/Moonbot-Tech/MoonProtoBeta.git?branch=main#f5ed8c6c393f2eb4c611bf7eac3aa7d365cebc1b"
 dependencies = [
  "aes-gcm",
  "base64",
  "crc32c",
+ "crc32fast",
  "flate2",
  "im",
  "libc",
